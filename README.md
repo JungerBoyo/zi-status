@@ -1,6 +1,6 @@
 # zi-status
 
-![Image]("assets/showoff.png")
+![](assets/showoff.png)
 
 currently shows:
     - date and time info
