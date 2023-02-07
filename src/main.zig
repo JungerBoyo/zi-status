@@ -1,6 +1,8 @@
 const c = @cImport({
     @cInclude("X11/Xlib.h");
     @cInclude("alsa/asoundlib.h");
+    @cInclude("NetworkManager.h");
+    @cInclude("glib.h");
 });
 
 const std = @import("std");
@@ -95,7 +97,7 @@ const Bat = struct {
     pub const BatReadError = error {
         FileOpenFailure,
         StreamTooLong,
-        ParseIntFailure,
+        FailedToParsePowerSupplyCapacity,
     };
 
     pub const State = enum(u8) {
@@ -131,7 +133,7 @@ const Bat = struct {
                     line[(CAPACITY_ARG.len)..(line.len)], 
                     10
                 ) catch {
-                    return error.ParseIntFailure;
+                    return error.FailedToParsePowerSupplyCapacity;
                 };
             } else if (std.mem.eql(u8, CHARGING_ARG, line[0..CHARGING_ARG.len])) {
                 if (std.mem.eql(u8, "Charging", line[(CHARGING_ARG.len)..(line.len)])) {
@@ -145,6 +147,115 @@ const Bat = struct {
         return result;
     }
 };
+
+const Net = struct {
+    pub const NMError = error {
+        CantConnectToNetworkManager,
+    };
+
+    pub const ConnectionSpeedUnit = enum(u8) {
+        mbs,
+        kbs
+    };
+    pub const ConnectionType = enum(u8) {
+        wifi,
+        ethernet,
+    };
+
+    pub const State = struct {
+        connection_speed_unit: ConnectionSpeedUnit,
+        connection_speed: u32,
+        connection_type: ConnectionType,
+        SSID: ?[]const u8,
+        ipv4: []const u8,
+    };
+
+    client: *c.NMClient,
+
+    pub fn init() NMError!Net {
+        var err: [*c]c.GError = 0x0;
+        // connect to network manager
+        var client = c.nm_client_new(0x0, &err);
+        if (client == null) {
+            std.log.err("zi-status:(NetworkManager) [{}] {s}", .{err.*.code, err.*.message});
+            c.g_error_free(err);
+            return error.CantConnectToNetworkManager;
+        }
+        return Net {
+            .client = client.?
+        };
+    }
+
+    pub fn state(self: *Net) void {
+        // list devices
+        const devices = c.nm_client_get_devices(self.client);
+
+        var i: usize = 0;
+        while (i < devices.*.len) : (i += 1) {
+            var device = @ptrCast(*c.NMDevice, devices.*.pdata[i]);
+            const active_connection = c.nm_device_get_active_connection(device); 
+            if (active_connection != null) { // is connection on <device> active
+                // query dev type wifi or ethernet
+                var device_type = c.nm_device_get_device_type(device); 
+                // clone connection, valid NMActiveConnection can't be used because it is 
+                // not dropped connection
+                const connection = c.nm_simple_connection_new_clone(
+                    @ptrCast(?*c.NMConnection, 
+                        c.nm_active_connection_get_connection(active_connection)
+                    )
+                );
+                _ = connection;
+                
+                // get ip
+                const ipv4_config = c.nm_device_get_ip4_config(device);
+                const ip_arr = c.nm_ip_config_get_addresses(ipv4_config);
+                const ip_address = @ptrCast(*c.NMIPAddress, ip_arr.*.pdata[0]);
+                // const ipv4_config = c.nm_connection_get_setting_ip4_config(connection);
+                // _ = ipv4_config;
+                // const ip_address = c.nm_setting_ip_config_get_address(ipv4_config, 0);
+                // _ = ip_address;
+                const mask_prefix = c.nm_ip_address_get_prefix(ip_address);
+                const address = c.nm_ip_address_get_address(ip_address);
+
+                if (device_type == c.NM_DEVICE_TYPE_ETHERNET) {
+                    std.log.info("device type: ethernet {}", .{active_connection != null});
+                    const ethernet_device = @ptrCast(?*c.NMDeviceEthernet, device);
+                    const speed_mbs = c.nm_device_ethernet_get_speed(ethernet_device);
+                    std.log.info("eth [{}Mb/s]", .{speed_mbs});
+                } else if (device_type == c.NM_DEVICE_TYPE_WIFI) {
+                    std.log.info("device type: wifi {}", .{active_connection != null});
+                    // const wifi_settings = c.nm_connection_get_setting_wireless(connection);
+                    const wifi_device = @ptrCast(?*c.NMDeviceWifi, device);
+                    const access_point = c.nm_device_wifi_get_active_access_point(wifi_device);
+                    const ssid = c.nm_access_point_get_ssid(access_point);
+                    //c.nm_setting_wireless_get_ssid(wifi_settings); 
+                    const ssid_utf8 = c.nm_utils_ssid_to_utf8(
+                        @ptrCast([*c]const c.guint8, c.g_bytes_get_data(ssid, 0x0)), 
+                        c.g_bytes_get_size(ssid)
+                    );
+
+                    const signal_strength = c.nm_access_point_get_strength(access_point);
+                    const max_bitrate = c.nm_access_point_get_max_bitrate(access_point);
+
+                    std.log.info("wifi [{s}/{}] [{s}] [{}%] [~{d:.2}Mb/s]", .{
+                        address[0..std.mem.len(address)],
+                        mask_prefix,
+                        ssid_utf8[0..std.mem.len(ssid_utf8)],
+                        signal_strength,
+                        (@intToFloat(f32, signal_strength) / 100.0) * @intToFloat(f32, max_bitrate/1000)
+                    });
+                    // const connection_setting = c.nm_connection_get_setting_connection(connection);
+                    // c.nm_setting_connection_
+                }
+            }
+        }
+    }
+
+    pub fn deinit(self: *Net) void {
+        c.g_object_unref(self.client);
+    }
+};
+
 
 const Mixer = struct {
     handle: ?*c.snd_mixer_t = null,
@@ -257,25 +368,37 @@ pub fn main() !void {
     var mixer = Mixer.init("default", "Master") catch |err| {
         switch (err) {
             error.MixerOpenFailure =>{
-                std.log.err("zi-status:(ALSA) failed to open a mixer", .{});
+                std.log.err("zi-status: failed to open a mixer", .{});
             }, 
             error.MixerAttachFailure => {
-                std.log.err("zi-status:(ALSA) failed to attach a mixer to card device", .{});
+                std.log.err("zi-status: failed to attach a mixer to card device", .{});
             },
             error.MixerSelemRegisterFailure => {
-                std.log.err("zi-status:(ALSA) failed to register element class to the mixer", .{});
+                std.log.err("zi-status: failed to register element class to the mixer", .{});
             },
             error.MixerLoadFailure=> {
-                std.log.err("zi-status:(ALSA) failed to load a mixer elements", .{});
+                std.log.err("zi-status: failed to load a mixer elements", .{});
             },
             error.CantReadVolumeRange => {
-                std.log.err("zi-status:(ALSA) failed to query min/max volume range", .{});
+                std.log.err("zi-status: failed to query min/max volume range", .{});
             },
         }
         return;
     };
     defer mixer.deinit();
-    
+
+    var net = Net.init() catch |err| {
+        switch (err) {
+            error.CantConnectToNetworkManager => {
+                std.log.err("zi-status: failed to connect to NetworkManager", .{});
+                return;
+            }
+        }
+    };
+    defer net.deinit();
+
+    net.state();
+
     while (true) {
         const date = Date.init(std.time.milliTimestamp() + timezone_offset_in_ms);
         const bat = Bat.init("/sys/class/power_supply/BAT0/uevent") catch |err| {
@@ -286,7 +409,7 @@ pub fn main() !void {
                 error.StreamTooLong => {
                     std.log.err("zi-status: failed to parse file /sys/class/power_supply/BAT0/uevent, some line exceeds 128 bytes", .{});
                 },
-                error.ParseIntFailure => {
+                error.FailedToParsePowerSupplyCapacity => {
                     std.log.err("zi-status: failed to parse file /sys/class/power_supply/BAT0/uevent, failed to parse one of arguments to int", .{});
                 }
             }

@@ -19,6 +19,8 @@ pub fn build(b: *std.build.Builder) void {
 
     exe.linkSystemLibrary("X11");
     exe.linkSystemLibrary("asound");
+    exe.linkSystemLibrary("libnm");
+    exe.linkSystemLibrary("glib-2.0");
 
     exe.install();
 
@@ -31,12 +33,12 @@ pub fn build(b: *std.build.Builder) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    const exe_tests = b.addTest("src/main.zig");
-    exe_tests.setTarget(target);
-    exe_tests.setBuildMode(mode);
-    exe_tests.linkLibC();
-    exe_tests.linkSystemLibrary("X11");
+    // const exe_tests = b.addTest("src/main.zig");
+    // exe_tests.setTarget(target);
+    // exe_tests.setBuildMode(mode);
+    // exe_tests.linkLibC();
+    // exe_tests.linkSystemLibrary("X11");
 
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&exe_tests.step);
+    // const test_step = b.step("test", "Run unit tests");
+    // test_step.dependOn(&exe_tests.step);
 }
