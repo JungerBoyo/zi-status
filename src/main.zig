@@ -153,21 +153,21 @@ const Net = struct {
         CantConnectToNetworkManager,
     };
 
-    pub const ConnectionSpeedUnit = enum(u8) {
-        mbs,
-        kbs
-    };
     pub const ConnectionType = enum(u8) {
         wifi,
         ethernet,
+        unknown,
     };
 
     pub const State = struct {
-        connection_speed_unit: ConnectionSpeedUnit,
-        connection_speed: u32,
-        connection_type: ConnectionType,
-        SSID: ?[]const u8,
-        ipv4: []const u8,
+        connection_speed: f32 = 0.0, // in Mb/s
+        connection_type: ConnectionType = .unknown,
+        signal_strength: u8 = 0,
+        SSID: [63]u8 = .{0} ** 63,
+        SSID_len: u8 = 0,
+        ipv4: [15]u8 = .{0} ** 15,
+        ipv4_len: u8 = 0,
+        mask: u8 = 0,
     };
 
     client: *c.NMClient,
@@ -186,7 +186,7 @@ const Net = struct {
         };
     }
 
-    pub fn state(self: *Net) void {
+    pub fn state(self: *Net) State {
         // list devices
         const devices = c.nm_client_get_devices(self.client);
 
@@ -195,60 +195,63 @@ const Net = struct {
             var device = @ptrCast(*c.NMDevice, devices.*.pdata[i]);
             const active_connection = c.nm_device_get_active_connection(device); 
             if (active_connection != null) { // is connection on <device> active
+                var result = State{};
+
                 // query dev type wifi or ethernet
                 var device_type = c.nm_device_get_device_type(device); 
-                // clone connection, valid NMActiveConnection can't be used because it is 
-                // not dropped connection
-                const connection = c.nm_simple_connection_new_clone(
-                    @ptrCast(?*c.NMConnection, 
-                        c.nm_active_connection_get_connection(active_connection)
-                    )
-                );
-                _ = connection;
                 
                 // get ip
                 const ipv4_config = c.nm_device_get_ip4_config(device);
                 const ip_arr = c.nm_ip_config_get_addresses(ipv4_config);
                 const ip_address = @ptrCast(*c.NMIPAddress, ip_arr.*.pdata[0]);
-                // const ipv4_config = c.nm_connection_get_setting_ip4_config(connection);
-                // _ = ipv4_config;
-                // const ip_address = c.nm_setting_ip_config_get_address(ipv4_config, 0);
-                // _ = ip_address;
                 const mask_prefix = c.nm_ip_address_get_prefix(ip_address);
                 const address = c.nm_ip_address_get_address(ip_address);
+                const address_len = std.mem.len(address);
+
+                result.mask = @intCast(u8, mask_prefix);
+                std.mem.copy( // copy with \0 included
+                    u8,
+                    result.ipv4[0..address_len], 
+                    address[0..address_len]
+                );
+                result.ipv4_len = @intCast(u8, address_len);
 
                 if (device_type == c.NM_DEVICE_TYPE_ETHERNET) {
-                    std.log.info("device type: ethernet {}", .{active_connection != null});
                     const ethernet_device = @ptrCast(?*c.NMDeviceEthernet, device);
                     const speed_mbs = c.nm_device_ethernet_get_speed(ethernet_device);
-                    std.log.info("eth [{}Mb/s]", .{speed_mbs});
+
+                    result.connection_type = .ethernet;
+                    result.connection_speed = @intToFloat(f32, speed_mbs);
+
+                    return result;
                 } else if (device_type == c.NM_DEVICE_TYPE_WIFI) {
-                    std.log.info("device type: wifi {}", .{active_connection != null});
-                    // const wifi_settings = c.nm_connection_get_setting_wireless(connection);
                     const wifi_device = @ptrCast(?*c.NMDeviceWifi, device);
                     const access_point = c.nm_device_wifi_get_active_access_point(wifi_device);
                     const ssid = c.nm_access_point_get_ssid(access_point);
-                    //c.nm_setting_wireless_get_ssid(wifi_settings); 
                     const ssid_utf8 = c.nm_utils_ssid_to_utf8(
                         @ptrCast([*c]const c.guint8, c.g_bytes_get_data(ssid, 0x0)), 
                         c.g_bytes_get_size(ssid)
                     );
-
+                    const ssid_utf8_len = std.mem.len(ssid_utf8);
                     const signal_strength = c.nm_access_point_get_strength(access_point);
                     const max_bitrate = c.nm_access_point_get_max_bitrate(access_point);
 
-                    std.log.info("wifi [{s}/{}] [{s}] [{}%] [~{d:.2}Mb/s]", .{
-                        address[0..std.mem.len(address)],
-                        mask_prefix,
-                        ssid_utf8[0..std.mem.len(ssid_utf8)],
-                        signal_strength,
-                        (@intToFloat(f32, signal_strength) / 100.0) * @intToFloat(f32, max_bitrate/1000)
-                    });
-                    // const connection_setting = c.nm_connection_get_setting_connection(connection);
-                    // c.nm_setting_connection_
+                    result.connection_type = .wifi;
+                    result.connection_speed =  (@intToFloat(f32, signal_strength) / 100.0) * @intToFloat(f32, max_bitrate/1000);
+                    result.signal_strength = @intCast(u8, signal_strength);
+                    std.mem.copy(
+                        u8,
+                        result.SSID[0..ssid_utf8_len], 
+                        ssid_utf8[0..ssid_utf8_len]
+                    );
+                    result.SSID_len = @intCast(u8, ssid_utf8_len);
+                    
+                    return result;
                 }
+
             }
         }
+        return State{};
     }
 
     pub fn deinit(self: *Net) void {
@@ -397,8 +400,6 @@ pub fn main() !void {
     };
     defer net.deinit();
 
-    net.state();
-
     while (true) {
         const date = Date.init(std.time.milliTimestamp() + timezone_offset_in_ms);
         const bat = Bat.init("/sys/class/power_supply/BAT0/uevent") catch |err| {
@@ -416,12 +417,21 @@ pub fn main() !void {
             return;
         };
         const vol = mixer.getVolume();
+        const net_state = net.state();
+        // 🛜
+        // 🪱
 
         var buf: [128]u8 = undefined;
         const status = std.fmt.bufPrint(
             &buf,
-            "[{s}{}%] [{s}~{}%{s}] [📅 {} {s} {}] [🕒 {s} {}:{}:{}]", 
+            "[{s}/{} {d:.2}Mb/s | {s} {s} {}%] [{s}{}%] [{s}~{}%{s}] [📅 {} {s} {}] [🕒 {s} {:0>2}:{:0>2}:{:0>2}]",
             .{
+                net_state.ipv4[0..net_state.ipv4_len],
+                net_state.mask,
+                net_state.connection_speed,
+                if (net_state.connection_type == .wifi) "🛜" else "🪱",
+                net_state.SSID[0..net_state.SSID_len],
+                net_state.signal_strength,
                 blk: {
                     if (vol <= 25) {
                         break :blk "🔈";
