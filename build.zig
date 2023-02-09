@@ -20,6 +20,7 @@ pub fn build(b: *std.build.Builder) void {
     exe.linkSystemLibrary("X11");
     exe.linkSystemLibrary("asound");
     exe.linkSystemLibrary("libnm");
+    exe.linkSystemLibrary("curl");
     exe.linkSystemLibrary("glib-2.0");
 
     exe.install();
