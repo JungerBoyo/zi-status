@@ -37,7 +37,7 @@ pub const SOUND_HIGH_TAG = "🔊";
 // WEATHER CONFIG
 pub const WEATHER_ENABLE = true;
 pub const WEATHER_UPDATE_PERIOD = 60; // [SLEEP_PERIOD]
-pub const WEATHER_X_API_KEY = "qP50N/aq5nLA+c/e78WcAA==075zlDstMnbMdhvX";
+pub const WEATHER_X_API_KEY = ":)";
 pub const WEATHER_CITY = "Bialystok";
 pub const WEATHER_TEMP_TAG = "⛅";
 pub const WEATHER_HUMIDITY_TAG = "⛅";
