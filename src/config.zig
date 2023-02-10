@@ -2,11 +2,12 @@
 pub const SLEEP_PERIOD = 1; // [s]
 
 // TIME CONFIG
+pub const DATE_TIME_UPDATE_PERIOD = 1; // [SLEEP_PERIOD]
 pub const TIME_ENABLE = true;
-pub const TIME_UPDATE_PERIOD = 1; // [SLEEP_PERIOD]
-pub const TIME_INCLUDE_SECONDS = true;
+pub const TIME_INCLUDE_SECONDS = false;
 pub const TIME_TAG = "🕒";
 pub const DATE_ENABLE = true;
+pub const DATE_ORDER_INDEX = 1;
 pub const DATE_TAG = "📅";
 
 // BAT CONFIG
@@ -20,7 +21,8 @@ pub const BAT_STATE_DISCHARGING_TAG = "🫠";
 pub const BAT_STATE_UNKNOWN_TAG = "🧐";
 
 // NET CONFIG
-pub const NET_ENABLE = false;
+pub const NET_ENABLE = true;
+pub const NET_INCLUDE_IP_ADDRESS = false;
 pub const NET_UPDATE_PERIOD = 1; // [SLEEP_PERIOD]
 pub const NET_WIFI_TAG = "🛜";
 pub const NET_ETHERNET_TAG = "🪱";
@@ -33,12 +35,30 @@ pub const SOUND_MIXER = "Master";
 pub const SOUND_LOW_TAG = "🔈";
 pub const SOUND_MEDIUM_TAG = "🔉";
 pub const SOUND_HIGH_TAG = "🔊";
+pub const SOUND_MUTE_TAG = "🔇";
 
 // WEATHER CONFIG
 pub const WEATHER_ENABLE = true;
-pub const WEATHER_UPDATE_PERIOD = 60; // [SLEEP_PERIOD]
+pub const WEATHER_UPDATE_PERIOD = 3 * 60 * 60; // [SLEEP_PERIOD]
 pub const WEATHER_X_API_KEY = ":)";
 pub const WEATHER_CITY = "Bialystok";
-pub const WEATHER_TEMP_TAG = "⛅";
-pub const WEATHER_HUMIDITY_TAG = "⛅";
-pub const WEATHER_SUNSET_TAG = "⛅";
+pub const WEATHER_TEMP_COLD_THRESHOLD = 9;
+pub const WEATHER_TEMP_HOT_THRESHOLD = 25;
+pub const WEATHER_TEMP_HIGH_TAG = "🥵";
+pub const WEATHER_TEMP_MEDIUM_TAG = "👌";
+pub const WEATHER_TEMP_LOW_TAG = "🥶";
+pub const WEATHER_HUMIDITY_TAG = "💧";
+pub const WEATHER_SUNSET_TAG = "🌇";
+
+// ORDERING CONFIG
+pub const Module = enum(u8) { time, date, bat, net, sound, weather };
+
+// from right to left
+pub const FMT_ORDER: [6]Module = .{
+    .time,
+    .date,
+    .bat,
+    .sound,
+    .net,
+    .weather,
+};   

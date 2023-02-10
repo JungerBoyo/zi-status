@@ -21,7 +21,7 @@ const ZiStatus = struct {
     // state
     date: Date,
     bat: ?Bat,     
-    volume: u8,
+    mixer_state: Mixer.State,
     net_state: ?Net.State,
     weather_state: ?Weather.State,
 
@@ -29,7 +29,7 @@ const ZiStatus = struct {
 
     timezone_offset: i64,
 
-    const ID_DATE       = 0;
+    const ID_DATE_TIME  = 0;
     const ID_BAT        = 1;
     const ID_MIXER      = 2;
     const ID_NET        = 3;
@@ -40,11 +40,15 @@ const ZiStatus = struct {
     else 
         "[{s} {s} {:0>2}:{:0>2}]";
 
+    const NET_FMT = if (config.NET_INCLUDE_IP_ADDRESS) 
+        "[{s}/{} {d:.2}Mb/s | {s} {s} {}%]"
+    else 
+        "[{d:.2}Mb/s | {s} {s} {}%]";
+
     const DATE_FMT      = "[{s} {} {s} {}]";
     const BAT_FMT       = "[{s}~{}%{s}]";
     const SOUND_FMT     = "[{s}{}%]";
-    const NET_FMT       = "[{s}/{} {d:.2}Mb/s | {s} {s} {}%]";
-    const WEATHER_FMT   = "[{s} {}({}) {s} {} {s} {:0>2}:{:0>2}:{:0>2}]";    
+    const WEATHER_FMT   = "[{s}{}({}) {s}{}% | {s}{:0>2}:{:0>2}]";    
 
     pub fn init(timezone_offset_in_ms: i64) anyerror!ZiStatus {
         return ZiStatus {
@@ -65,7 +69,7 @@ const ZiStatus = struct {
                     try Bat.init(config.BAT_UEVENT_PATH)
                 else    
                     null,
-            .volume = 0,
+            .mixer_state = Mixer.State{},
             .net_state = null,
             .weather_state = null,
             .timezone_offset = timezone_offset_in_ms,
@@ -73,12 +77,12 @@ const ZiStatus = struct {
     }
 
     pub fn tryUpdate(self: *ZiStatus) void {
-        if (config.TIME_ENABLE) {
-            const counter = &self.update_counters[ID_DATE];
+        if (config.TIME_ENABLE or config.DATE_ENABLE) {
+            const counter = &self.update_counters[ID_DATE_TIME];
             if (counter.* == 0) {
                 self.date = Date.init(std.time.milliTimestamp() + self.timezone_offset);
             } 
-            if (counter.* == config.TIME_UPDATE_PERIOD) {
+            if (counter.* == config.DATE_TIME_UPDATE_PERIOD) {
                 counter.* = 0;
             } else {
                 counter.* += 1;
@@ -101,7 +105,7 @@ const ZiStatus = struct {
             const counter = &self.update_counters[ID_MIXER];
             if (counter.* == 0) {
                 if (self.mixer) |*mixer| {
-                    self.volume = mixer.getVolume();
+                    self.mixer_state = mixer.state();
                 }
             } 
             if (counter.* == config.SOUND_UPDATE_PERIOD) {
@@ -126,15 +130,20 @@ const ZiStatus = struct {
         }
 
         if (config.WEATHER_ENABLE) {
-            const counter = &self.update_counters[ID_NET];
+            const counter = &self.update_counters[ID_WEATHER];
             if (counter.* == 0) {
                 if (self.weather) |*weather| {
-                    weather.stateRequest();
-                    while (!weather.stateAvailable()) {}
-                    self.weather_state = weather.state() catch null;
+                    if (weather.stateReceiving()) {
+                        return;
+                    } else if (weather.stateAvailable()) {
+                        self.weather_state = weather.state() catch null;
+                    } else {
+                        weather.stateRequest();
+                        return;
+                    }
                 }
             } 
-            if (counter.* == config.NET_UPDATE_PERIOD) {
+            if (counter.* == config.WEATHER_UPDATE_PERIOD) {
                 counter.* = 0;
             } else {
                 counter.* += 1;
@@ -142,12 +151,19 @@ const ZiStatus = struct {
         }
     }
 
-    pub fn setStatusString(self: ZiStatus, buf: []u8) void {
-        var status_len: usize = 0;
+    fn trySetStatusStringWeather(self: *ZiStatus, buf: []u8) usize {
         if (config.WEATHER_ENABLE) {
             if (self.weather_state) |*weather_state| {
-                const status = std.fmt.bufPrint(buf[status_len..], WEATHER_FMT, .{
-                    config.WEATHER_TEMP_TAG,
+                const status = std.fmt.bufPrint(buf, WEATHER_FMT, .{
+                    blk: {
+                        if (weather_state.temperature >= config.WEATHER_TEMP_HOT_THRESHOLD) {
+                            break :blk config.WEATHER_TEMP_HIGH_TAG;
+                        } else if (weather_state.temperature <= config.WEATHER_TEMP_COLD_THRESHOLD) {
+                            break :blk config.WEATHER_TEMP_LOW_TAG;
+                        } else {
+                            break :blk config.WEATHER_TEMP_MEDIUM_TAG;
+                        }
+                    } ,
                     weather_state.temperature,
                     weather_state.temperature_feels_like,
                     config.WEATHER_HUMIDITY_TAG,
@@ -155,51 +171,73 @@ const ZiStatus = struct {
                     config.WEATHER_SUNSET_TAG,
                     weather_state.sunset.hour,
                     weather_state.sunset.minute,
-                    weather_state.sunset.second,
                 }) catch unreachable;
-                status_len += status.len;
-                buf[status_len] = ' ';
-                status_len += 1;
+                return status.len;
             }
         }
+        return 0;
+    }
+
+    fn trySetStatusStringNet(self: *ZiStatus, buf: []u8) usize {
         if (config.NET_ENABLE) {
             if (self.net_state) |*net_state| {
-                const status = std.fmt.bufPrint(buf[status_len..], NET_FMT, .{
-                    net_state.ipv4[0..net_state.ipv4_len],
-                    net_state.mask,
-                    net_state.connection_speed,
-                    if (net_state.connection_type == .wifi) 
-                        config.NET_WIFI_TAG
-                    else
-                        config.NET_ETHERNET_TAG,
-                    net_state.SSID[0..net_state.SSID_len],
-                    net_state.signal_strength,
-                }) catch unreachable;
-                status_len += status.len;
-                buf[status_len] = ' ';
-                status_len += 1;
+                const status = std.fmt.bufPrint(buf, NET_FMT, 
+                if (config.NET_INCLUDE_IP_ADDRESS)
+                    .{
+                        net_state.ipv4[0..net_state.ipv4_len],
+                        net_state.mask,
+                        net_state.connection_speed,
+                        if (net_state.connection_type == .wifi) 
+                            config.NET_WIFI_TAG
+                        else
+                            config.NET_ETHERNET_TAG,
+                        net_state.SSID[0..net_state.SSID_len],
+                        net_state.signal_strength,
+                    } 
+                else 
+                    .{
+                        net_state.connection_speed,
+                        if (net_state.connection_type == .wifi) 
+                            config.NET_WIFI_TAG
+                        else
+                            config.NET_ETHERNET_TAG,
+                        net_state.SSID[0..net_state.SSID_len],
+                        net_state.signal_strength,
+                    }
+                ) catch unreachable;
+                return status.len;
             }
         }
+        return 0;
+    }
+
+    fn trySetStatusStringSound(self: *ZiStatus, buf: []u8) usize {
         if (config.SOUND_ENABLE) {
-            const status = std.fmt.bufPrint(buf[status_len..], SOUND_FMT, .{
+            const status = std.fmt.bufPrint(buf, SOUND_FMT, .{
                 blk: {
-                    if (self.volume <= 25) {
-                        break :blk config.SOUND_LOW_TAG; 
-                    } else if (self.volume >= 75) {
-                        break :blk config.SOUND_HIGH_TAG; 
+                    if (self.mixer_state.is_unmuted) {
+                        if (self.mixer_state.volume <= 25) {
+                            break :blk config.SOUND_LOW_TAG; 
+                        } else if (self.mixer_state.volume >= 75) {
+                            break :blk config.SOUND_HIGH_TAG; 
+                        } else {
+                            break :blk config.SOUND_MEDIUM_TAG;
+                        }
                     } else {
-                        break :blk config.SOUND_MEDIUM_TAG;
+                        break :blk config.SOUND_MUTE_TAG;
                     }
                 },
-                self.volume,
+                self.mixer_state.volume,
             }) catch unreachable;
-            status_len += status.len;
-            buf[status_len] = ' ';
-            status_len += 1;
+            return status.len;
         }
+        return 0;
+    }
+
+    fn trySetStatusStringBat(self: *ZiStatus, buf: []u8) usize {
         if (config.BAT_ENABLE) {
             if (self.bat) |bat| {
-                const status = std.fmt.bufPrint(buf[status_len..], BAT_FMT, .{
+                const status = std.fmt.bufPrint(buf, BAT_FMT, .{
                     if (bat.capacity <= 20) 
                         config.BAT_LOW_TAG 
                     else 
@@ -211,24 +249,28 @@ const ZiStatus = struct {
                         .unknown     => config.BAT_STATE_UNKNOWN_TAG,
                     },
                 }) catch unreachable;
-                status_len += status.len;
-                buf[status_len] = ' ';
-                status_len += 1;
+                return status.len;
             }
         }
+        return 0;
+    }
+
+    fn trySetStatusStringDate(self: *ZiStatus, buf: []u8) usize {
         if (config.DATE_ENABLE) {
-            const status = std.fmt.bufPrint(buf[status_len..], DATE_FMT, .{
+            const status = std.fmt.bufPrint(buf, DATE_FMT, .{
                 config.DATE_TAG,
                 self.date.day_of_month,
                 self.date.month,
                 self.date.year,
             }) catch unreachable;
-            status_len += status.len;
-            buf[status_len] = ' ';
-            status_len += 1;
+            return status.len;
         }
+        return 0;
+    }
+
+    fn trySetStatusStringTime(self: *ZiStatus, buf: []u8) usize {
         if (config.TIME_ENABLE) {
-            const status = std.fmt.bufPrint(buf[status_len..], TIME_FMT, 
+            const status = std.fmt.bufPrint(buf, TIME_FMT, 
             if (config.TIME_INCLUDE_SECONDS)
                 .{
                     config.TIME_TAG,
@@ -245,8 +287,33 @@ const ZiStatus = struct {
                     self.date.minute,
                 }
             ) catch unreachable;
-            status_len += status.len;
+            return status.len;
         }
+        return 0;
+    } 
+
+    pub fn setStatusString(self: *ZiStatus, buf: []u8) void {
+        var status_len: usize = 0;
+
+        var i: i32 = @intCast(i32, config.FMT_ORDER.len) - 1;
+        while (i >= 0) : (i -= 1) {
+            const len_to_add = switch (config.FMT_ORDER[@intCast(usize, i)]) {
+                .time => self.trySetStatusStringTime(buf[status_len..]),
+                .date => self.trySetStatusStringDate(buf[status_len..]),
+                .bat => self.trySetStatusStringBat(buf[status_len..]),
+                .sound => self.trySetStatusStringSound(buf[status_len..]),
+                .net => self.trySetStatusStringNet(buf[status_len..]),
+                .weather => self.trySetStatusStringWeather(buf[status_len..]),    
+            };
+
+            status_len += len_to_add;
+
+            if (len_to_add != 0 and i > 0) {
+                buf[status_len] = ' ';
+                status_len += 1;
+            }
+        }
+
         buf[status_len] = 0; // delim with 0 (zig str => c str)
     }
 
@@ -300,7 +367,7 @@ pub fn main() !void {
                 std.log.err("zi-status: failed to connect to NetworkManager", .{});
             },
             error.CurlInitFailed => {
-                std.log.err("zi-status: failed to init weahter service (curl init failed)", .{});
+                std.log.err("zi-status: failed to init weather service (curl init failed)", .{});
             },
             error.FileOpenFailure => {
                 std.log.err("zi-status: failed to open file {s}", .{config.BAT_UEVENT_PATH});
@@ -311,7 +378,7 @@ pub fn main() !void {
             error.FailedToParsePowerSupplyCapacity => {
                 std.log.err("zi-status: failed to parse file {s}, failed to parse one of arguments to int", .{config.BAT_UEVENT_PATH});
             },
-            else => { }
+            else => {}
         }
         return;
     };
@@ -320,7 +387,7 @@ pub fn main() !void {
     while (true) {
         zi_status.tryUpdate();
 
-        var buf: [128]u8 = undefined;
+        var buf: [256]u8 = undefined;
         zi_status.setStatusString(&buf);
 
         _ = c.XStoreName(x_dpy, c.DefaultRootWindow(x_dpy), &buf);

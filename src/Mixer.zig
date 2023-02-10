@@ -20,6 +20,11 @@ pub const ALSAError = error {
     CantReadVolumeRange,
 };
 
+pub const State = struct {
+    volume: u8 = 0,
+    is_unmuted: bool = false,
+};
+
 pub fn init(card: [:0]const u8, selem_name: [:0]const u8) ALSAError!Self {
     var handle: ?*c.snd_mixer_t = null;
     if (c.snd_mixer_open(&handle, 0) != 0) {
@@ -59,7 +64,7 @@ pub fn init(card: [:0]const u8, selem_name: [:0]const u8) ALSAError!Self {
 }
 
 // returns volume level in %
-pub fn getVolume(self: *Self) u8 {
+pub fn state(self: *Self) State {
     _ = c.snd_mixer_handle_events(self.handle);
 
     var vol_lhs: c_long = 0;
@@ -68,12 +73,24 @@ pub fn getVolume(self: *Self) u8 {
         c.SND_MIXER_SCHN_SIDE_LEFT,
         &vol_lhs
     );
-    
     var vol_rhs: c_long = 0;
     _ = c.snd_mixer_selem_get_playback_volume(
         self.elem, 
-        c.SND_MIXER_SCHN_SIDE_LEFT,
+        c.SND_MIXER_SCHN_SIDE_RIGHT,
         &vol_rhs
+    );
+
+    var vol_unmuted_lhs: c_int = 0;
+    _ = c.snd_mixer_selem_get_playback_switch(
+        self.elem,
+        c.SND_MIXER_SCHN_SIDE_LEFT,
+        &vol_unmuted_lhs
+    );
+    var vol_unmuted_rhs: c_int = 0;
+    _ = c.snd_mixer_selem_get_playback_switch(
+        self.elem,
+        c.SND_MIXER_SCHN_SIDE_RIGHT,
+        &vol_unmuted_rhs
     );
 
     const vol_resolution = self.vol_max - self.vol_min;
@@ -81,7 +98,11 @@ pub fn getVolume(self: *Self) u8 {
     const vol = @divTrunc(vol_lhs + vol_rhs, 2);
     const vol_normalized = @divTrunc((100 * (vol - self.vol_min)), vol_resolution);
 
-    return @intCast(u8, vol_normalized);
+    return State {
+        .volume = @intCast(u8, vol_normalized),
+        .is_unmuted = vol_unmuted_lhs == 1 or vol_unmuted_rhs == 1,         
+    };
+
 }
 
 pub fn deinit(self: *Self) void {
