@@ -1,7 +1,7 @@
 # zi-status
 ---
 
-<p align="center">
+<p>
     <img src="assets/showoff.png"/>
 </p>
 
