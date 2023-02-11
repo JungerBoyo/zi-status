@@ -100,7 +100,7 @@ pub fn stateAvailable(self: *Self) bool {
     return @atomicLoad(bool, &self.received_data, .Acquire);
 }
 
-pub fn state(self: *Self) !State {
+pub fn state(self: *Self, timezone_offset_ms: i64) !State {
     @atomicStore(bool, &self.received_data, false, .Release);
     var stream = std.json.TokenStream.init(self.received_data_buffer[0..self.received_data_buffer_size]);
     const internal_state = try std.json.parse(InternalState, &stream, .{ .ignore_unknown_fields = true });
@@ -108,7 +108,7 @@ pub fn state(self: *Self) !State {
         .temperature = internal_state.temp,
         .temperature_feels_like = internal_state.feels_like,
         .humidity = internal_state.humidity,
-        .sunset = Date.init(internal_state.sunset * 1000)
+        .sunset = Date.init(internal_state.sunset * 1000 + timezone_offset_ms)
     };
 }
 

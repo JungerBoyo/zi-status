@@ -156,7 +156,7 @@ const ZiStatus = struct {
                     if (weather.stateReceiving()) {
                         return;
                     } else if (weather.stateAvailable()) {
-                        self.weather_state = weather.state() catch null;
+                        self.weather_state = weather.state(self.timezone_offset) catch null;
                     } else {
                         weather.stateRequest();
                         return;
