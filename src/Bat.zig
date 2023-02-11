@@ -3,8 +3,8 @@ const std = @import("std");
 const Self = @This();
 
 pub const BatReadError = error {
-    FileOpenFailure,
-    StreamTooLong,
+    BatFileOpenFailure,
+    BatStreamTooLong,
     FailedToParsePowerSupplyCapacity,
 };
 
@@ -25,7 +25,7 @@ pub fn init(bat_uevent_path: []const u8) BatReadError!Self {
         bat_uevent_path, 
         .{ .mode = .read_only }
     ) catch {
-        return error.FileOpenFailure;
+        return error.BatFileOpenFailure;
     };
     defer file.close();
 
@@ -34,7 +34,7 @@ pub fn init(bat_uevent_path: []const u8) BatReadError!Self {
     var result = Self{};
 
     var buf: [128]u8 = undefined;
-    while (file_reader.readUntilDelimiterOrEof(&buf, '\n') catch { return error.StreamTooLong; }) |line| {
+    while (file_reader.readUntilDelimiterOrEof(&buf, '\n') catch { return error.BatStreamTooLong; }) |line| {
         if (std.mem.eql(u8, CAPACITY_ARG, line[0..CAPACITY_ARG.len])) {
             result.capacity = std.fmt.parseInt(
                 u8, 

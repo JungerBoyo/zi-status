@@ -11,6 +11,7 @@ const Bat       = @import("Bat.zig");
 const Mixer     = @import("Mixer.zig");
 const Net       = @import("Net.zig");
 const Weather   = @import("Weather.zig");
+const Mem       = @import("Mem.zig");
 
 const ZiStatus = struct {
     // handles
@@ -21,11 +22,12 @@ const ZiStatus = struct {
     // state
     date: Date,
     bat: ?Bat,     
+    mem: ?Mem,
     mixer_state: Mixer.State,
     net_state: ?Net.State,
     weather_state: ?Weather.State,
 
-    update_counters: [5]u64 = .{0} ** 5,
+    update_counters: [6]u64 = .{0} ** 6,
 
     timezone_offset: i64,
 
@@ -34,6 +36,7 @@ const ZiStatus = struct {
     const ID_MIXER      = 2;
     const ID_NET        = 3;
     const ID_WEATHER    = 4;
+    const ID_MEM        = 5;
 
     const TIME_FMT = if (config.TIME_INCLUDE_SECONDS)
         "[{s} {s} {:0>2}:{:0>2}:{:0>2}]" 
@@ -47,8 +50,9 @@ const ZiStatus = struct {
 
     const DATE_FMT      = "[{s} {} {s} {}]";
     const BAT_FMT       = "[{s}~{}%{s}]";
+    const MEM_FMT       = "[{s}~{}MB]";
     const SOUND_FMT     = "[{s}{}%]";
-    const WEATHER_FMT   = "[{s}{}({}) {s}{}% | {s}{:0>2}:{:0>2}]";    
+    const WEATHER_FMT   = "[{s}{}({}) {s}{}% {s}{:0>2}:{:0>2}]";    
 
     pub fn init(timezone_offset_in_ms: i64) anyerror!ZiStatus {
         return ZiStatus {
@@ -68,6 +72,10 @@ const ZiStatus = struct {
             .bat = if (config.BAT_ENABLE)
                     try Bat.init(config.BAT_UEVENT_PATH)
                 else    
+                    null,
+            .mem = if (config.MEM_ENABLE)
+                    try Mem.init(config.MEM_INFO_PATH)
+                else 
                     null,
             .mixer_state = Mixer.State{},
             .net_state = null,
@@ -123,6 +131,18 @@ const ZiStatus = struct {
                 }
             } 
             if (counter.* == config.NET_UPDATE_PERIOD) {
+                counter.* = 0;
+            } else {
+                counter.* += 1;
+            }
+        }
+
+        if (config.MEM_ENABLE) {
+            const counter = &self.update_counters[ID_MEM];
+            if (counter.* == 0) {
+                self.mem = Mem.init(config.MEM_INFO_PATH) catch null;
+            } 
+            if (counter.* == config.MEM_UPDATE_PERIOD) {
                 counter.* = 0;
             } else {
                 counter.* += 1;
@@ -292,17 +312,31 @@ const ZiStatus = struct {
         return 0;
     } 
 
+    fn trySetStatusStringMem(self: *ZiStatus, buf: []u8) usize {
+        if (config.MEM_ENABLE) {
+            if (self.mem) |mem| {
+                const status = std.fmt.bufPrint(buf, MEM_FMT, .{
+                    config.MEM_TAG,
+                    mem.ram_usage_MB
+                }) catch unreachable;
+                return status.len;
+            }
+        }
+        return 0;
+    }
+
     pub fn setStatusString(self: *ZiStatus, buf: []u8) void {
         var status_len: usize = 0;
 
         var i: i32 = @intCast(i32, config.FMT_ORDER.len) - 1;
         while (i >= 0) : (i -= 1) {
             const len_to_add = switch (config.FMT_ORDER[@intCast(usize, i)]) {
-                .time => self.trySetStatusStringTime(buf[status_len..]),
-                .date => self.trySetStatusStringDate(buf[status_len..]),
-                .bat => self.trySetStatusStringBat(buf[status_len..]),
-                .sound => self.trySetStatusStringSound(buf[status_len..]),
-                .net => self.trySetStatusStringNet(buf[status_len..]),
+                .time    => self.trySetStatusStringTime(buf[status_len..]),
+                .date    => self.trySetStatusStringDate(buf[status_len..]),
+                .bat     => self.trySetStatusStringBat(buf[status_len..]),
+                .mem     => self.trySetStatusStringMem(buf[status_len..]),
+                .sound   => self.trySetStatusStringSound(buf[status_len..]),
+                .net     => self.trySetStatusStringNet(buf[status_len..]),
                 .weather => self.trySetStatusStringWeather(buf[status_len..]),    
             };
 
@@ -369,14 +403,23 @@ pub fn main() !void {
             error.CurlInitFailed => {
                 std.log.err("zi-status: failed to init weather service (curl init failed)", .{});
             },
-            error.FileOpenFailure => {
+            error.BatFileOpenFailure => {
                 std.log.err("zi-status: failed to open file {s}", .{config.BAT_UEVENT_PATH});
             },
-            error.StreamTooLong => {
+            error.BatStreamTooLong => {
                 std.log.err("zi-status: failed to parse file {s}, some line exceeds 128 bytes", .{config.BAT_UEVENT_PATH});
             },
             error.FailedToParsePowerSupplyCapacity => {
                 std.log.err("zi-status: failed to parse file {s}, failed to parse one of arguments to int", .{config.BAT_UEVENT_PATH});
+            },
+            error.MemFileOpenFailure => {
+                std.log.err("zi-status: failed to open file {s}", .{config.MEM_INFO_PATH});
+            },
+            error.FailedToParseTotalMemArg => {
+                std.log.err("zi-status: faied to parse total mem from file {s}",.{config.MEM_INFO_PATH});
+            },
+            error.FailedToParseAvailableMemArg => {
+                std.log.err("zi-status: faied to parse available mem from file {s}",.{config.MEM_INFO_PATH});
             },
             else => {}
         }

@@ -37,6 +37,12 @@ pub const SOUND_MEDIUM_TAG = "🔉";
 pub const SOUND_HIGH_TAG = "🔊";
 pub const SOUND_MUTE_TAG = "🔇";
 
+// MEM CONFIG
+pub const MEM_ENABLE = true;
+pub const MEM_UPDATE_PERIOD = 1; // [SLEEP_PERIOD]
+pub const MEM_INFO_PATH = "/proc/meminfo";
+pub const MEM_TAG = "♎";
+
 // WEATHER CONFIG
 pub const WEATHER_ENABLE = true;
 pub const WEATHER_UPDATE_PERIOD = 3 * 60 * 60; // [SLEEP_PERIOD]
@@ -51,14 +57,15 @@ pub const WEATHER_HUMIDITY_TAG = "💧";
 pub const WEATHER_SUNSET_TAG = "🌇";
 
 // ORDERING CONFIG
-pub const Module = enum(u8) { time, date, bat, net, sound, weather };
+pub const Module = enum(u8) { time, date, bat, net, sound, weather, mem };
 
 // from right to left
-pub const FMT_ORDER: [6]Module = .{
+pub const FMT_ORDER: [7]Module = .{
     .time,
     .date,
     .bat,
     .sound,
+    .mem,
     .net,
     .weather,
 };   

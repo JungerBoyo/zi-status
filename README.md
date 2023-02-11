@@ -11,4 +11,6 @@
  - date and time info
  - battery info
  - sound level info (ALSA)
+ - ram memory usage in MB
+ - weather info (temp+humidity+sunset)
 
