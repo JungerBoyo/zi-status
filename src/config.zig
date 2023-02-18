@@ -26,6 +26,7 @@ pub const NET_INCLUDE_IP_ADDRESS = false;
 pub const NET_UPDATE_PERIOD = 1; // [SLEEP_PERIOD]
 pub const NET_WIFI_TAG = "🛜";
 pub const NET_ETHERNET_TAG = "🪱";
+pub const NET_UNKNOWN_TAG = "🤷";
 
 // SOUND CONFIG
 pub const SOUND_ENABLE = true;

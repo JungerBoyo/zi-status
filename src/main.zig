@@ -128,6 +128,11 @@ const ZiStatus = struct {
             if (counter.* == 0) {
                 if (self.net) |*net| {
                     self.net_state = net.state();
+                } else {
+                    self.net = Net.init() catch null;
+                    if (self.net) |*net| {
+                        self.net_state = net.state();
+                    }
                 }
             } 
             if (counter.* == config.NET_UPDATE_PERIOD) {
@@ -207,20 +212,22 @@ const ZiStatus = struct {
                         net_state.ipv4[0..net_state.ipv4_len],
                         net_state.mask,
                         net_state.connection_speed,
-                        if (net_state.connection_type == .wifi) 
-                            config.NET_WIFI_TAG
-                        else
-                            config.NET_ETHERNET_TAG,
+                        switch (net_state.connection_type) {
+                            .wifi => config.NET_WIFI_TAG,
+                            .ethernet => config.NET_ETHERNET_TAG,
+                            .unknown => config.NET_UNKNOWN_TAG,
+                        },
                         net_state.SSID[0..net_state.SSID_len],
                         net_state.signal_strength,
                     } 
                 else 
                     .{
                         net_state.connection_speed,
-                        if (net_state.connection_type == .wifi) 
-                            config.NET_WIFI_TAG
-                        else
-                            config.NET_ETHERNET_TAG,
+                        switch (net_state.connection_type) {
+                            .wifi => config.NET_WIFI_TAG,
+                            .ethernet => config.NET_ETHERNET_TAG,
+                            .unknown => config.NET_UNKNOWN_TAG,
+                        },
                         net_state.SSID[0..net_state.SSID_len],
                         net_state.signal_strength,
                     }
@@ -423,7 +430,7 @@ pub fn main() !void {
             },
             else => {}
         }
-        return;
+        return err;
     };
     defer zi_status.deinit();
 

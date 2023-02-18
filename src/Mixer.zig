@@ -67,40 +67,26 @@ pub fn init(card: [:0]const u8, selem_name: [:0]const u8) ALSAError!Self {
 pub fn state(self: *Self) State {
     _ = c.snd_mixer_handle_events(self.handle);
 
-    var vol_lhs: c_long = 0;
+    var vol: c_long = 0;
     _ = c.snd_mixer_selem_get_playback_volume(
         self.elem, 
-        c.SND_MIXER_SCHN_SIDE_LEFT,
-        &vol_lhs
+        c.SND_MIXER_SCHN_MONO,
+        &vol
     );
-    var vol_rhs: c_long = 0;
-    _ = c.snd_mixer_selem_get_playback_volume(
-        self.elem, 
-        c.SND_MIXER_SCHN_SIDE_RIGHT,
-        &vol_rhs
-    );
-
-    var vol_unmuted_lhs: c_int = 0;
+    var vol_unmuted: c_int = 0;
     _ = c.snd_mixer_selem_get_playback_switch(
         self.elem,
-        c.SND_MIXER_SCHN_SIDE_LEFT,
-        &vol_unmuted_lhs
-    );
-    var vol_unmuted_rhs: c_int = 0;
-    _ = c.snd_mixer_selem_get_playback_switch(
-        self.elem,
-        c.SND_MIXER_SCHN_SIDE_RIGHT,
-        &vol_unmuted_rhs
+        c.SND_MIXER_SCHN_MONO,
+        &vol_unmuted
     );
 
     const vol_resolution = self.vol_max - self.vol_min;
 
-    const vol = @divTrunc(vol_lhs + vol_rhs, 2);
     const vol_normalized = @divTrunc((100 * (vol - self.vol_min)), vol_resolution);
 
     return State {
         .volume = @intCast(u8, vol_normalized),
-        .is_unmuted = vol_unmuted_lhs == 1 or vol_unmuted_rhs == 1,         
+        .is_unmuted = vol_unmuted == 1
     };
 
 }
