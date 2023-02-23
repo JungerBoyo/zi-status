@@ -387,6 +387,8 @@ pub fn main() !void {
 
     const sleep_time: u64 = config.SLEEP_PERIOD * 1_000_000_000; // 1 [s]
 
+    std.time.sleep(config.SLEEP_PERIODS_BEFORE_INIT * sleep_time);
+
     var zi_status = ZiStatus.init(timezone_offset_in_ms) catch |err| {
         switch (err) {
             error.MixerOpenFailure =>{

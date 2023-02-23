@@ -1,6 +1,11 @@
 // GENERAL 
 pub const SLEEP_PERIOD = 1; // [s]
 
+// sometimes some modules don't "catch" instantly 
+// so it is a dirty way of mitigating the issue
+// (for now hopefully 🫠)
+pub const SLEEP_PERIODS_BEFORE_INIT = 30;
+
 // TIME CONFIG
 pub const DATE_TIME_UPDATE_PERIOD = 1; // [SLEEP_PERIOD]
 pub const TIME_ENABLE = true;
