@@ -14,6 +14,9 @@ const Weather   = @import("Weather.zig");
 const Mem       = @import("Mem.zig");
 
 const ZiStatus = struct {
+    // display
+    x_dpy: *c.Display,
+
     // handles
     mixer: ?Mixer,
     net: ?Net,
@@ -54,8 +57,10 @@ const ZiStatus = struct {
     const SOUND_FMT     = "[{s}{}%]";
     const WEATHER_FMT   = "[{s}{}({}) {s}{}% {s}{:0>2}:{:0>2}]";    
 
-    pub fn init(timezone_offset_in_ms: i64) anyerror!ZiStatus {
+    pub fn init(x_dpy: *c.Display, timezone_offset_in_ms: i64) anyerror!ZiStatus {
         return ZiStatus {
+            .x_dpy = x_dpy,
+
             .mixer = if (config.SOUND_ENABLE)
                     try Mixer.init(config.SOUND_CARD, config.SOUND_MIXER)
                 else 
@@ -332,19 +337,56 @@ const ZiStatus = struct {
         return 0;
     }
 
+    fn trySetStatusStringMousePos(self: *ZiStatus, buf: []u8) usize {
+        if (config.MOUSE_POS_ENABLE) {
+            var focused_x_win: c.Window = undefined; 
+            var revert_to: c_int = 0;
+
+            _ = c.XGetInputFocus(self.x_dpy, &focused_x_win, &revert_to);
+
+            var dummy: c.Window = undefined;
+            var mask_return: c_uint = 0;
+            var win_mouse_x: c_int = 0;
+            var win_mouse_y: c_int = 0;
+            var root_mouse_x: c_int = 0;
+            var root_mouse_y: c_int = 0;
+            _ = c.XQueryPointer(
+                self.x_dpy, focused_x_win, &dummy, &dummy, 
+                &root_mouse_x, &root_mouse_y, 
+                &win_mouse_x, &win_mouse_y,
+                &mask_return
+            );
+
+            const status = std.fmt.bufPrint(
+                buf, 
+                "[{s}({:.2}, {:.2})]", 
+                .{
+                    config.MOUSE_POS_TAG,
+                    root_mouse_x, 
+                    root_mouse_y,
+                }
+            ) catch unreachable;
+
+            return status.len;
+        }
+
+        return 0;
+    }
+
     pub fn setStatusString(self: *ZiStatus, buf: []u8) void {
         var status_len: usize = 0;
 
         var i: i32 = @intCast(i32, config.FMT_ORDER.len) - 1;
         while (i >= 0) : (i -= 1) {
             const len_to_add = switch (config.FMT_ORDER[@intCast(usize, i)]) {
-                .time    => self.trySetStatusStringTime(buf[status_len..]),
-                .date    => self.trySetStatusStringDate(buf[status_len..]),
-                .bat     => self.trySetStatusStringBat(buf[status_len..]),
-                .mem     => self.trySetStatusStringMem(buf[status_len..]),
-                .sound   => self.trySetStatusStringSound(buf[status_len..]),
-                .net     => self.trySetStatusStringNet(buf[status_len..]),
-                .weather => self.trySetStatusStringWeather(buf[status_len..]),    
+                .time       => self.trySetStatusStringTime(buf[status_len..]),
+                .date       => self.trySetStatusStringDate(buf[status_len..]),
+                .bat        => self.trySetStatusStringBat(buf[status_len..]),
+                .mem        => self.trySetStatusStringMem(buf[status_len..]),
+                .sound      => self.trySetStatusStringSound(buf[status_len..]),
+                .net        => self.trySetStatusStringNet(buf[status_len..]),
+                .weather    => self.trySetStatusStringWeather(buf[status_len..]),    
+                .mouse_pos  => self.trySetStatusStringMousePos(buf[status_len..]),
             };
 
             status_len += len_to_add;
@@ -389,7 +431,7 @@ pub fn main() !void {
 
     std.time.sleep(config.SLEEP_PERIODS_BEFORE_INIT * sleep_time);
 
-    var zi_status = ZiStatus.init(timezone_offset_in_ms) catch |err| {
+    var zi_status = ZiStatus.init(x_dpy.?, timezone_offset_in_ms) catch |err| {
         switch (err) {
             error.MixerOpenFailure =>{
                 std.log.err("zi-status: failed to open a mixer", .{});

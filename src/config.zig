@@ -4,7 +4,7 @@ pub const SLEEP_PERIOD = 1; // [s]
 // sometimes some modules don't "catch" instantly 
 // so it is a dirty way of mitigating the issue
 // (for now hopefully 🫠)
-pub const SLEEP_PERIODS_BEFORE_INIT = 30;
+pub const SLEEP_PERIODS_BEFORE_INIT = 5;
 
 // TIME CONFIG
 pub const DATE_TIME_UPDATE_PERIOD = 1; // [SLEEP_PERIOD]
@@ -62,12 +62,17 @@ pub const WEATHER_TEMP_LOW_TAG = "🥶";
 pub const WEATHER_HUMIDITY_TAG = "💧";
 pub const WEATHER_SUNSET_TAG = "🌇";
 
+// MOUSE POS CONFIG
+pub const MOUSE_POS_ENABLE = true;
+pub const MOUSE_POS_TAG = "🐭";
+
 // ORDERING CONFIG
-pub const Module = enum(u8) { time, date, bat, net, sound, weather, mem };
+pub const Module = enum(u8) { time, date, bat, net, sound, weather, mem, mouse_pos };
 
 // from right to left
-pub const FMT_ORDER: [7]Module = .{
+pub const FMT_ORDER: [8]Module = .{
     .time,
+    .mouse_pos,
     .date,
     .bat,
     .sound,
